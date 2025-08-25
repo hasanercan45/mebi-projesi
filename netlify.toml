@@ -4,6 +4,3 @@
 
 [functions]
   directory = "netlify/functions"
-
-[functions."*"] # Tüm fonksiyonlar için geçerli ayar
-  runtime = "python3.11"
