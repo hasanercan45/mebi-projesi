@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Mebi - Ses Baloncukları</title>
+<style>
+    body, html {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: #000;
+        color: white;
+    }
+
+    /* Sol ve Sağ Panelleri Oluşturma */
+    #left-panel {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 50%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-top: 5vh;
+        box-sizing: border-box;
+    }
+    #right-panel {
+        position: absolute;
+        right: 0;
+        top: 0;
+        width: 50%;
+        height: 100%;
+    }
+
+    /* BÜYÜK KAMERA STİLİ */
+    #camera-feed {
+        width: 80%;
+        max-width: 640px; /* Kameranın çok fazla büyümesini engelle */
+        height: auto;
+        border-radius: 15px;
+        border: 2px solid #444;
+    }
+
+    /* İsim gösterme alanı */
+    #name-display {
+        background-color: rgba(255, 255, 255, 0.9);
+        color: #333;
+        padding: 15px;
+        border-radius: 10px;
+        font-size: 20px;
+        font-weight: bold;
+        display: none;
+        border: 1px solid #ccc;
+        margin-top: 20px;
+        text-align: center;
+    }
+    
+    /* Kontrol Butonları ve Durum Yazısı */
+    #controls {
+        position: absolute;
+        bottom: 5vh;
+        left: 0;
+        width: 100%;
+        text-align: center;
+    }
+    #start-button, #end-button {
+        padding: 12px 25px;
+        font-size: 18px;
+        border-radius: 30px;
+        border: 1px solid #fff;
+        background-color: transparent;
+        color: white;
+        cursor: pointer;
+        transition: background-color 0.3s, color 0.3s;
+        margin: 5px;
+    }
+    #start-button:hover, #end-button:hover {
+        background-color: #fff;
+        color: #000;
+    }
+    #status {
+        margin-top: 15px;
+        color: #aaa;
+        height: 20px;
+    }
+
+    /* Sağ Paneldeki Baloncuk Alanı */
+    #visualizer-container {
+        width: 100%;
+        height: 100%;
+        filter: url('#goo');
+        position: relative; /* İçindeki balonun pozisyonu buna göre ayarlanacak */
+    }
+
+    /* TEK ve ORTALI KONUŞMA BALONU */
+    .bubble {
+        position: absolute;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 30%, #4f80c2, #0b4a8b);
+        transform: scale(0);
+        /* Balonu ortalamak için */
+        left: 50%;
+        top: 50%;
+        /* Boyutunu küçülttük */
+        width: 100px;      /* <-- Değişti */
+        height: 100px;     /* <-- Değişti */
+        margin-left: -100px; /* <-- Değişti (Yeni genişliğin yarısı) */
+        margin-top: -100px;  /* <-- Değişti (Yeni yüksekliğin yarısı) */
+    }
+</style>
+</head>
+<body>
+    <div id="left-panel">
+        <video id="camera-feed" autoplay muted></video>
+        <div id="name-display"></div>
+        <div id="controls">
+            <button id="start-button">Seansı Başlat</button>
+            <button id="end-button" style="display: none;">Seansı Bitir</button>
+            <div id="status">Durum: Başlamaya Hazır</div>
+        </div>
+    </div>
+
+    <div id="right-panel">
+        <div id="visualizer-container"></div>
+    </div>
+    
+    <svg style="display:none;">
+        <defs>
+            <filter id="goo">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="15" result="blur" />
+                <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="goo" />
+                <feBlend in="SourceGraphic" in2="goo" />
+            </filter>
+        </defs>
+    </svg>
+
+    <script>
+        // ---- ELEMENTLER VE DEĞİŞKENLER ----
+        const videoElement = document.getElementById('camera-feed');
+        const startButton = document.getElementById('start-button');
+        const endButton = document.getElementById('end-button');
+        const statusDiv = document.getElementById('status');
+        const visualizerContainer = document.getElementById('visualizer-container');
+        const nameDisplay = document.getElementById('name-display');
+        const bubbles = [];
+        const BUBBLE_COUNT = 1;
+
+        // Seans yönetim değişkenleri
+        let isSessionActive = false;      // Aktif bir sohbet olup olmadığını tutar
+        let recognitionInterval = null;   // Yüz tanıma döngüsünün zamanlayıcısını tutar
+
+        // ---- AYARLAR ----
+        const GEMINI_API_KEY = "AIzaSyBOUX3CrmA3F-9yYFF-S_ku8I6ZZ8gc6L4"; // Kendi Gemini API anahtarınız
+        const ELEVENLABS_API_KEY = "sk_2718ec14a054c44b27dce0b3cc4fc76981ca24682c401187"; // Kendi ElevenLabs API anahtarınız
+        const RECOGNITION_INTERVAL_MS = 3000; // Her 3 saniyede bir yüz tanıma denemesi yap
+
+        // ---- KAMERA BAŞLATMA ----
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                videoElement.srcObject = stream;
+                videoElement.style.display = 'block';
+            } catch (err) {
+                console.error("Kamera başlatılamadı:", err);
+                statusDiv.textContent = "Hata: Kamera erişim izni reddedildi.";
+            }
+        }
+        window.addEventListener('load', startCamera);
+
+        // ---- BALONCUK GÖRSELLEŞTİRME KODLARI (Değişiklik yok) ----
+        for (let i = 0; i < BUBBLE_COUNT; i++) {
+            const bubble = document.createElement('div');
+            bubble.classList.add('bubble');
+            // Pozisyon ve boyut artık tamamen CSS tarafından yönetildiği için
+            // JavaScript içinde bu değerleri ayarlamıyoruz.
+            visualizerContainer.appendChild(bubble);
+            bubbles.push(bubble);
+        }
+        let audioContext;
+        let analyser;
+        let animationFrameId;
+        function setupAudioAnalysis(audioElement) {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 128;
+            }
+            const source = audioContext.createMediaElementSource(audioElement);
+            source.connect(analyser);
+            analyser.connect(audioContext.destination);
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            function updateBubbles() {
+                analyser.getByteFrequencyData(dataArray);
+                let totalVolume = dataArray.reduce((sum, value) => sum + value, 0);
+                let averageVolume = totalVolume / bufferLength;
+                bubbles.forEach((bubble, index) => {
+                    const band = Math.floor(index * (bufferLength / BUBBLE_COUNT));
+                    const bandVolume = dataArray[band] / 255;
+                    const scale = bandVolume * 2 + (averageVolume / 255) * 0.5;
+                    bubble.style.transform = `scale(${Math.max(0.1, scale)})`;
+                });
+                animationFrameId = requestAnimationFrame(updateBubbles);
+            }
+            updateBubbles();
+        }
+        function stopAudioAnalysis() {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+                bubbles.forEach(bubble => bubble.style.transform = 'scale(0)');
+            }
+        }
+        // ---- GÖRSELLEŞTİRME SONU ----
+
+        // ---- KONUŞMA TANIMA VE SENTEZLEME (API'ler) ----
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+        if(recognition) {
+            recognition.continuous = false;
+            recognition.lang = 'tr-TR';
+            recognition.interimResults = false;
+            recognition.onresult = (event) => {
+                const speechResult = event.results[0][0].transcript;
+                statusDiv.textContent = `Siz: "${speechResult}" - Mebi düşünüyor...`;
+                
+                // Tanınan ismi (recognizedName) Gemini'ye gönderiyoruz
+                let currentUserName = document.getElementById('name-display').textContent.replace('Hoş Geldiniz, ', '');
+                getGeminiResponse(speechResult, currentUserName); 
+            };
+            recognition.onerror = (event) => {
+                statusDiv.textContent = `Hata: ${event.error}. Tekrar dinlemeye çalışıyorum.`;
+                if (isSessionActive) {
+                    setTimeout(startListening, 1000);
+                }
+            };
+        }
+        function startListening() {
+            if (!recognition || !isSessionActive) return;
+            statusDiv.textContent = "Durum: Sizi Dinliyor...";
+            try {
+                recognition.start();
+            } catch(e) {
+                console.info("Dinleme zaten başlamış olabilir.");
+            }
+        }
+        
+        // Lütfen mevcut getGeminiResponse fonksiyonunu bu versiyonla tamamen değiştirin.
+        async function getGeminiResponse(prompt, userName) {
+            const model_name = "gemini-1.5-flash";
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model_name}:generateContent?key=${GEMINI_API_KEY}`;
+
+            // --- YAZIM HATASI DÜZELTİLMİŞ VE API DOSTU YENİ KOMUT ---
+            const system_prompt = `Senin adın Mebidir. Görevin, yapay zeka ve teknoloji konularında mentörlük yapmaktır.
+            
+            KURALLARIN:
+            1. Cevapların her zaman kısa, net ve saygılı olmalı.
+            2. Kullanıcının adı ${userName}. Bu ismi sohbet sırasında sürekli tekrar etmekten kaçın. Sadece kullanıcı kimliğini sorduğunda ("ben kimim?") veya çok gerekliyse kullan.
+            3. Kullanıcı "ben kimim?" diye sorarsa, cevabın "Sizi isminizle, Sayın ${userName} olarak tanıyorum, bunun dışında hakkınızda kişisel bir bilgim yok." olmalı.
+            4. Sohbetin odağını daima yapay zeka, programlama ve teknoloji konularında tut.
+            
+            Kullanıcının (${userName}) sorusu: "${prompt}"`;
+
+            const requestBody = {
+            "contents": [{"parts": [{"text": system_prompt }]}],
+            "generationConfig": {
+                "temperature": 0.5,
+                "maxOutputTokens": 100
+            }
+            };
+            
+            try {
+                const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
+                if (!response.ok) {
+                    // Hatanın detayını konsola yazdır
+                    const errorBody = await response.json();
+                    console.error("Gemini API Hatası Detayı:", JSON.stringify(errorBody, null, 2));
+                    throw new Error(`API Hatası: ${response.statusText}`);
+                }
+                const data = await response.json();
+
+                let textResponse = data.candidates[0].content.parts[0].text.trim();
+                textResponse = textResponse.replace(/```/g, '');
+                speakWithElevenLabs(textResponse, true);
+            } catch (error) {
+                console.error("Gemini API Hatası:", error);
+                statusDiv.textContent = `Hata: Yapay zeka ile iletişim kurulamadı. (Detaylar için konsolu kontrol edin)`;
+                if (isSessionActive) startListening();
+            }
+        }
+       
+       
+        async function speakWithElevenLabs(text, shouldStartListeningAfter = false) {
+            statusDiv.textContent = "Mebi konuşuyor...";
+            const voiceId = "xyqF3vGMQlPk3e7yA4DI"; // Örnek ses ID'si
+            const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+            const headers = { "Accept": "audio/mpeg", "Content-Type": "application/json", "xi-api-key": ELEVENLABS_API_KEY };
+            const body = JSON.stringify({ "text": text, "model_id": "eleven_multilingual_v2", "voice_settings": { "stability": 0.5, "similarity_boost": 0.75 }});
+            try {
+                const response = await fetch(url, { method: 'POST', headers: headers, body: body });
+                if (!response.ok) throw new Error(`ElevenLabs API Hatası: ${response.statusText}`);
+                const audioBlob = await response.blob();
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+                audio.oncanplaythrough = () => {
+                    setupAudioAnalysis(audio);
+                    audio.play();
+                };
+                audio.onended = () => {
+                    stopAudioAnalysis();
+                    if (shouldStartListeningAfter && isSessionActive) {
+                        startListening();
+                    }
+                };
+            } catch (error) {
+                console.error("ElevenLabs Hatası:", error);
+                statusDiv.textContent = `Hata: Ses üretilemedi.`;
+                if (shouldStartListeningAfter && isSessionActive) {
+                    startListening();
+                }
+            }
+        }
+        // ---- API FONKSİYONLARI SONU ----
+
+
+        // ---- SEANS VE YÜZ TANIMA MANTIĞI ----
+
+        // Bu fonksiyon periyodik olarak çalışıp yüz tanıma yapar
+        async function recognizeAndStartSession() {
+            if (isSessionActive) {
+                // Eğer zaten bir seans aktifse, bu fonksiyon hiçbir şey yapmaz.
+                console.log("Seans aktif, yeni yüz tanıma atlanıyor.");
+                return;
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = videoElement.videoWidth;
+            canvas.height = videoElement.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+            const imageDataUrl = canvas.toDataURL('image/jpeg');
+            
+            try {
+                const response = await fetch('/.netlify/functions/yoklama', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: imageDataUrl }),
+                });
+                if (!response.ok) throw new Error(`Sunucuya bağlanılamadı: ${response.status}`);
+                
+                const data = await response.json();
+                
+                // Eğer bilinen bir yüz bulunduysa ve seans aktif değilse
+                if (data.name && data.name !== "Bilinmeyen Kişi" && !isSessionActive) {
+                    nameDisplay.textContent = `Hoş Geldiniz, ${data.name}`; // YENİ: İsmi kutuya yazdır
+                    nameDisplay.style.display = 'block';                     // YENİ: Kutuyu görünür yap
+                    // BAŞARI DURUMU: Seansı başlat!
+                    console.log(`${data.name} tanındı. Seans başlıyor.`);
+                    isSessionActive = true;             // Seansı aktif olarak işaretle
+                    clearInterval(recognitionInterval); // Yüz tanıma döngüsünü durdur
+                    recognitionInterval = null;
+
+                    startButton.style.display = 'none'; // "Başlat" butonunu gizle
+                    endButton.style.display = 'inline'; // "Bitir" butonunu göster
+
+                    const greeting = `Hoş geldiniz, Sayın ${data.name}. Size yapay zeka yolculuğunuzda nasıl yardımcı olabilirim?`;
+                    speakWithElevenLabs(greeting, true); // Selamlamayı seslendir ve ardından dinlemeye başla
+                
+                } else if (!isSessionActive) { // Sadece seans aktif değilken durumu güncelle
+                    statusDiv.textContent = "Tanıdık bir yüz aranıyor...";
+                    nameDisplay.style.display = 'none'; // YENİ: İsim kutusunu gizle
+                }
+            } catch (error) {
+                console.error("Yüz tanıma isteği hatası:", error);
+                statusDiv.textContent = "Hata: Yüz tanıma sunucusuna erişilemiyor.";
+                // Hata durumunda döngüyü durdurup başa dönmek daha güvenli olabilir.
+                endSession(); 
+            }
+        }
+
+        function endSession() {
+            isSessionActive = false;
+            if (recognitionInterval) {
+                clearInterval(recognitionInterval);
+                recognitionInterval = null;
+            }
+            if(recognition) {
+                recognition.stop();
+            }
+            document.getElementById('name-display').style.display = 'none'; // YENİ: İsim kutusunu gizle
+            startButton.style.display = 'inline';
+            endButton.style.display = 'none';
+            statusDiv.textContent = "Durum: Başlamaya Hazır";
+            stopAudioAnalysis();
+            console.log("Seans sonlandırıldı.");
+        }
+        
+        // BUTON OLAYLARI
+        startButton.addEventListener('click', () => {
+            if (!recognitionInterval) {
+                statusDiv.textContent = "Yüz tanıma döngüsü başlatıldı. Tanıdık bir yüz aranıyor...";
+                // Belirlenen aralıklarla yüz tanıma fonksiyonunu çalıştır
+                recognitionInterval = setInterval(recognizeAndStartSession, RECOGNITION_INTERVAL_MS);
+                startButton.style.display = 'none'; // Butonu gizle ki tekrar basılmasın
+            }
+        });
+
+        endButton.addEventListener('click', endSession);
+
+    </script>
+</body>
+</html>
