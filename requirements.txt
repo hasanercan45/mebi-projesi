@@ -1,10 +1,11 @@
-setuptools
-wheel
-Flask==2.2.3
-gunicorn==20.1.0
-Flask-Cors==3.0.10
-opencv-python-headless==4.8.0.74
-numpy==1.24.3
-deepface==0.0.79
-tf-keras==2.13.1
-tensorflow==2.13.0
+Flask
+gunicorn
+Flask-Cors
+opencv-python-headless
+numpy
+# deepface'in en güncel versiyonunu kurmasına izin veriyoruz
+deepface
+# tensorflow'un en güncel versiyonunu kurmasına izin veriyoruz
+tensorflow
+# tf-keras'in en güncel versiyonunu kurmasına izin veriyoruz
+tf-keras
