@@ -1,11 +1,8 @@
-Flask
-gunicorn
-Flask-Cors
-opencv-python-headless
-numpy
-# deepface'in en güncel versiyonunu kurmasına izin veriyoruz
+Flask==3.0.0
+gunicorn==22.0.0
+Flask-Cors==4.0.1
+opencv-python-headless==4.8.0.74
+numpy==1.24.3
 deepface
-# tensorflow'un en güncel versiyonunu kurmasına izin veriyoruz
-tensorflow
-# tf-keras'in en güncel versiyonunu kurmasına izin veriyoruz
-tf-keras
+tensorflow==2.15.0
+keras==2.15.0
