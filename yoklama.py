@@ -74,7 +74,7 @@ def yoklama_yap():
             id, confidence = recognizer.predict(gray_img[y:y+h, x:x+w])
 
             # Güven skoru ne kadar düşükse, eşleşme o kadar iyidir.
-            if confidence < 70: # Bu eşik değeriyle oynayabilirsiniz (örn: 50 daha hassas)
+            if confidence < 50: # Bu eşik değeriyle oynayabilirsiniz (örn: 50 daha hassas)
                 name = label_map.get(id, "Bilinmeyen Kişi")
                 response_data["name"] = name.capitalize()
                 response_data["status"] = f"Hoş geldin, {name.capitalize()}!"
