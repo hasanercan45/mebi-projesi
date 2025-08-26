@@ -334,7 +334,10 @@
                 console.log("Seans aktif, yeni yüz tanıma atlanıyor.");
                 return;
             }
-
+            if (videoElement.readyState < 3 || videoElement.videoWidth === 0) {
+                console.log("Kamera henüz hazır değil, bir sonraki deneme bekleniyor.");
+                return; // Kameradan geçerli bir görüntü gelene kadar bu denemeyi atla.
+            }
             const canvas = document.createElement('canvas');
             canvas.width = videoElement.videoWidth;
             canvas.height = videoElement.videoHeight;
@@ -343,7 +346,7 @@
             const imageDataUrl = canvas.toDataURL('image/jpeg');
             
             try {
-                const response = await fetch('/.netlify/functions/yoklama', {
+                const response = await fetch('https://mebi-projesi.onrender.com/yoklama_yap', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ image: imageDataUrl }),
