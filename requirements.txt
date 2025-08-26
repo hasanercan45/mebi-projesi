@@ -1,6 +1,8 @@
-Flask
-gunicorn
-Flask-Cors
-deepface
-opencv-python-headless
-tf-keras
+Flask==2.2.3
+gunicorn==20.1.0
+Flask-Cors==3.0.10
+deepface==0.0.79
+tensorflow==2.13.0
+keras==2.13.1
+opencv-python-headless==4.8.0.74
+tf-keras==2.13.1
