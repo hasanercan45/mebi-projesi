@@ -2,100 +2,72 @@ import json
 import base64
 import cv2
 import numpy as np
-import face_recognition
 import os
+from deepface import DeepFace
+import shutil
 
-# --- YÜZLERİ ÖĞRENME AŞAMASI ---
-# Bu kısım fonksiyon her çağrıldığında yeniden çalışacak.
-# Daha performanslı yöntemler olsa da, projemiz için bu yeterlidir.
-known_face_encodings = []
-known_face_names = []
+# DeepFace'in model dosyalarını indirebileceği ve kullanabileceği geçici bir alan oluşturma
+# Netlify Functions'da sadece /tmp/ klasörü yazılabilirdir.
+HOME = '/tmp/'
+os.environ['DEEPFACE_HOME'] = HOME
 
-# Klasör yolu, fonksiyonun çalıştığı yere göre ayarlanır.
-# Netlify, projenin ana dizinini baz alır.
-known_faces_dir = "static/known_faces"
-
-# known_faces klasöründeki her bir alt klasör (kişi) için döngü başlat
-for person_name in os.listdir(known_faces_dir):
-    person_dir = os.path.join(known_faces_dir, person_name)
-    if not os.path.isdir(person_dir):
-        continue
-    
-    # O kişiye ait klasördeki her bir fotoğraf için döngü başlat
-    for filename in os.listdir(person_dir):
-        if not (filename.endswith((".jpg", ".jpeg", ".png"))):
-            continue
-            
-        image_path = os.path.join(person_dir, filename)
-        try:
-            image = face_recognition.load_image_file(image_path)
-            encodings = face_recognition.face_encodings(image)
-            if encodings:
-                known_face_encodings.append(encodings[0])
-                known_face_names.append(person_name)
-        except Exception as e:
-            print(f"Hata: {image_path} dosyası yüklenemedi veya işlenemedi. Hata: {e}")
-
-print("Bilinen yüzler yüklendi.")
-# --- ÖĞRENME AŞAMASI BİTTİ ---
-
-# --- NETLIFY HANDLER FONKSİYONU ---
 def handler(event, context):
     try:
-        # Gelen isteğin gövdesini (body) al ve JSON olarak ayrıştır
         body = json.loads(event['body'])
         image_data = body['image'].split(',')[1]
 
         decoded_image = base64.b64decode(image_data)
         np_arr = np.frombuffer(decoded_image, np.uint8)
         img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        
-        face_locations = face_recognition.face_locations(img)
-        unknown_face_encodings = face_recognition.face_encodings(img, face_locations)
-        
-        # Varsayılan cevap
+
+        # DeepFace, yüzleri bir klasördeki resimlerle karşılaştırır.
+        # Projemizdeki 'static/known_faces' klasörünü kullanacağız.
+        db_path = "static/known_faces"
+
+        # Yüz tanıma işlemini gerçekleştir
+        # enforce_detection=False: Resimde yüz bulamazsa hata vermek yerine boş sonuç döner.
+        dfs = DeepFace.find(
+            img_path=img, 
+            db_path=db_path, 
+            model_name='VGG-Face', 
+            enforce_detection=False
+        )
+
         response_data = {
-            "status": "Yüz Algılanamadı. Lütfen Kameraya Bakın.",
-            "name": None,
+            "status": "Yüz algılandı, ancak kayıtlı değil.",
+            "name": "Bilinmeyen Kişi",
             "confidence": None
         }
-        
-        if len(face_locations) > 1:
-            response_data["status"] = "Birden Fazla Yüz Algılandı. Lütfen Tek Kişi Olun."
-        elif len(face_locations) == 1 and unknown_face_encodings:
-            unknown_encoding = unknown_face_encodings[0]
-            
-            face_distances = face_recognition.face_distance(known_face_encodings, unknown_encoding)
-            
-            best_match_index = np.argmin(face_distances)
-            best_distance = face_distances[best_match_index]
-            
-            TOLERANCE = 0.6
-            
-            if best_distance <= TOLERANCE:
-                name = known_face_names[best_match_index]
-                confidence = round((1 - best_distance) * 100)
-                
-                response_data["status"] = f"Hoş geldin, {name.capitalize()}!"
-                response_data["name"] = name.capitalize()
-                response_data["confidence"] = confidence
-            else:
-                response_data["status"] = "Yüz algılandı, ancak kayıtlı değil."
-                response_data["name"] = "Bilinmeyen Kişi"
-                response_data["confidence"] = round((1 - best_distance) * 100)
 
-        # Netlify'e başarılı bir cevap (200) ve JSON verisini döndür
+        # DeepFace bir sonuç bulduysa
+        if dfs and not dfs[0].empty:
+            # Sonuçlar bir "dataframe" içinde gelir, en iyi eşleşmeyi alalım.
+            best_match = dfs[0].iloc[0]
+            identity = best_match['identity']
+
+            # Dosya yolundan ismi alalım (örn: static/known_faces/hasan/hasan1.jpg -> hasan)
+            # Not: Windows'taki \ ayracını ve Unix'teki / ayracını hesaba katar
+            name = os.path.basename(os.path.dirname(identity))
+
+            response_data["status"] = f"Hoş geldin, {name.capitalize()}!"
+            response_data["name"] = name.capitalize()
+            # DeepFace doğrudan bir güven skoru vermez, ama bir eşleşme bulması yeterlidir.
+
+        # Her çalıştırma sonrası /tmp klasörünü temizlemek iyi bir pratiktir.
+        # Aksi takdirde bir sonraki çalıştırmada alan dolabilir.
+        if os.path.exists(os.path.join(HOME, ".deepface")):
+            shutil.rmtree(os.path.join(HOME, ".deepface"))
+
         return {
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*' # Güvenlik için normalde buraya sitenizin adresi yazılır
+                'Access-Control-Allow-Origin': '*'
             },
             'body': json.dumps(response_data)
         }
 
     except Exception as e:
-        # Herhangi bir hata olursa, hatayı logla ve 500 hatası döndür
         print(f"Sunucu hatası: {e}")
         return {
             'statusCode': 500,
@@ -103,5 +75,5 @@ def handler(event, context):
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            'body': json.dumps({'error': 'Sunucuda bir hata oluştu.'})
+            'body': json.dumps({'error': 'Sunucuda bir hata oluştu.', 'details': str(e)})
         }
